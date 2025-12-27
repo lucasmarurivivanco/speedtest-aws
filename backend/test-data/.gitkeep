@@ -1,0 +1,2 @@
+This directory will contain temporary test files generated during I/O operations.
+Files are automatically cleaned up after tests complete.

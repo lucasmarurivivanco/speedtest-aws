@@ -1,0 +1,16 @@
+{
+  "name": "AWS Speed Test",
+  "short_name": "SpeedTest",
+  "description": "Compare EC2 performance between AWS Local Zone Chile and sa-east-1 São Paulo",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0ea5e9",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
