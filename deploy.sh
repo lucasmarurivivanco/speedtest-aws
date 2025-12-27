@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# AWS EC2 Deployment Script
-# This script helps deploy the application to EC2 instances
+# AWS EC2 Local Deployment Script
+# Execute this script directly on each EC2 instance via SSM
 
-echo "🚀 AWS Speed Test - Deployment Script"
-echo "======================================"
+echo "🚀 AWS Speed Test - Local Deployment Script"
+echo "============================================="
 echo ""
 
 # Colors
@@ -13,86 +13,90 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Check if EC2 IP is provided
-if [ -z "$1" ]; then
-    echo -e "${RED}Error: EC2 IP address not provided${NC}"
-    echo "Usage: ./deploy.sh <EC2_IP> <KEY_FILE>"
-    echo "Example: ./deploy.sh 54.123.456.789 ~/my-key.pem"
+# Check if docker-compose.yml exists in current directory
+if [ ! -f "docker-compose.yml" ]; then
+    echo -e "${RED}Error: docker-compose.yml not found${NC}"
+    echo "Please run this script from the speedtest-aws directory"
+    echo ""
+    echo "Expected structure:"
+    echo "  speedtest-aws/"
+    echo "  ├── docker-compose.yml"
+    echo "  ├── frontend/"
+    echo "  └── backend/"
     exit 1
 fi
 
-EC2_IP=$1
-KEY_FILE=${2:-"~/.ssh/id_rsa"}
-
-echo -e "${YELLOW}Target EC2:${NC} $EC2_IP"
-echo -e "${YELLOW}SSH Key:${NC} $KEY_FILE"
+echo -e "${YELLOW}Current directory:${NC} $(pwd)"
 echo ""
 
-# Check if key file exists
-if [ ! -f "$KEY_FILE" ]; then
-    echo -e "${RED}Error: Key file not found: $KEY_FILE${NC}"
+# Get EC2 metadata
+echo -e "${YELLOW}Detecting EC2 region...${NC}"
+REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+
+echo -e "${GREEN}Region:${NC} $REGION"
+echo -e "${GREEN}Public IP:${NC} $PUBLIC_IP"
+echo ""
+
+# Create a backup of docker-compose.yml
+cp docker-compose.yml docker-compose.yml.backup
+
+# Update docker-compose.yml with the public IP
+sed -i "s|NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://$PUBLIC_IP:3001|g" docker-compose.yml
+
+# Add REGION environment variable to backend if not present
+if ! grep -q "REGION=" docker-compose.yml; then
+    sed -i "/PORT=3001/a\      - REGION=$REGION" docker-compose.yml
+fi
+
+echo -e "${GREEN}Configuration updated for region: $REGION${NC}"
+echo ""
+
+# Check if Docker is running
+if ! docker ps &> /dev/null; then
+    echo -e "${RED}Error: Docker is not running${NC}"
+    echo "Please start Docker first: sudo service docker start"
     exit 1
 fi
 
-echo -e "${GREEN}Step 1:${NC} Connecting to EC2..."
-ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no ec2-user@$EC2_IP "echo 'Connection successful!'"
+echo -e "${GREEN}Step 1:${NC} Stopping existing containers..."
+docker compose down
+
+echo ""
+echo -e "${GREEN}Step 2:${NC} Building Docker images..."
+docker compose build
 
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Error: Could not connect to EC2${NC}"
+    echo -e "${RED}Error: Build failed${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}Step 2:${NC} Installing Docker..."
-ssh -i "$KEY_FILE" ec2-user@$EC2_IP << 'ENDSSH'
-    sudo yum update -y
-    sudo yum install -y docker
-    sudo service docker start
-    sudo usermod -a -G docker ec2-user
-    
-    # Install Docker Compose
-    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    sudo chmod +x /usr/local/bin/docker-compose
-    
-    # Install Git
-    sudo yum install -y git
-    
-    echo "Docker and Docker Compose installed successfully!"
-ENDSSH
+echo ""
+echo -e "${GREEN}Step 3:${NC} Starting containers..."
+docker compose up -d
 
-echo -e "${GREEN}Step 3:${NC} Creating application directory..."
-ssh -i "$KEY_FILE" ec2-user@$EC2_IP "mkdir -p ~/speedtest-aws"
+echo ""
+echo -e "${YELLOW}Waiting for services to start...${NC}"
+sleep 10
 
-echo -e "${GREEN}Step 4:${NC} Copying files to EC2..."
-scp -i "$KEY_FILE" -r \
-    docker-compose.yml \
-    backend \
-    frontend \
-    ec2-user@$EC2_IP:~/speedtest-aws/
-
-echo -e "${GREEN}Step 5:${NC} Building and starting Docker containers..."
-ssh -i "$KEY_FILE" ec2-user@$EC2_IP << 'ENDSSH'
-    cd ~/speedtest-aws
-    docker-compose down
-    docker-compose build
-    docker-compose up -d
-    
-    echo ""
-    echo "Waiting for services to start..."
-    sleep 10
-    
-    echo ""
-    echo "Container status:"
-    docker-compose ps
-ENDSSH
+echo ""
+echo -e "${GREEN}Step 4:${NC} Checking container status..."
+docker compose ps
 
 echo ""
 echo -e "${GREEN}✅ Deployment completed!${NC}"
 echo ""
-echo "Your application should be available at:"
-echo -e "${YELLOW}http://$EC2_IP${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "${GREEN}Your application is ready!${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "To check logs:"
-echo "  ssh -i $KEY_FILE ec2-user@$EC2_IP 'cd ~/speedtest-aws && docker-compose logs'"
+echo -e "  ${YELLOW}Region:${NC} $REGION"
+echo -e "  ${YELLOW}URL:${NC} http://$PUBLIC_IP"
 echo ""
-echo "To restart:"
-echo "  ssh -i $KEY_FILE ec2-user@$EC2_IP 'cd ~/speedtest-aws && docker-compose restart'"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Useful commands:"
+echo "  docker compose logs -f       # View logs"
+echo "  docker compose restart       # Restart services"
+echo "  docker compose down          # Stop services"
+echo "  docker compose ps            # Check status"
